@@ -1,0 +1,9 @@
+crewai
+crewai-tools
+streamlit
+groq
+sentence-transformers
+faiss-cpu
+python-docx
+requests
+python-dotenv
