@@ -35,55 +35,13 @@ def run_research_pipeline(req: ResearchRequest):
     # 1. Orchestrator
     parsed_query = run_orchestrator(req.question)
     
-    # 2. Literature Agent
-    # For speed, we just use the first keyword or the raw question
-    search_term = " ".join(parsed_query.get("keywords_for_search", [req.question]))
-    enriched_papers = run_literature_agent(search_term)
+    # Use only the first keyword to prevent API rejection from overly long strings
+    search_keywords = parsed_query.get("keywords_for_search", [req.question])
+    search_term = search_keywords[0] if search_keywords else req.question
+    literature_state = run_literature_agent(search_term, parsed_query)
     
-    # Format papers for the frontend global state
-    frontend_papers = []
-    for item in enriched_papers:
-        p = item["paper"]
-        frontend_papers.append({
-            "paper_id": p.url, "title": p.title, "authors": ["Unknown"], 
-            "year": p.year, "venue": "Journal", "citation_count": 0,
-            "relevance_score": 8, "abstract_summary": item["insight"],
-            "key_findings": [item["insight"]], "doi_or_url": p.url
-        })
-    
-    lit_synthesis = "Based on the retrieved literature, we observe several patterns..."
-    if frontend_papers:
-        lit_synthesis = f"Found {len(frontend_papers)} highly relevant papers. " + " ".join([p["abstract_summary"] for p in frontend_papers])
-        
-    literature_state = {
-        "papers": frontend_papers,
-        "synthesis": lit_synthesis,
-        "knowledge_gaps": ["Gap 1", "Gap 2"],
-        "consensus_findings": [],
-        "contradictions": []
-    }
-
     # 3. Hypothesis Agent
-    hypothesis_list_obj = run_hypothesis_agent(enriched_papers)
-    # The frontend expects an array of dicts, not the Pydantic wrapper
-    hypotheses_raw = []
-    if hypothesis_list_obj and hasattr(hypothesis_list_obj, 'hypotheses'):
-        for h in hypothesis_list_obj.hypotheses:
-            # We convert our schema back to what the frontend expects
-            hypotheses_raw.append({
-                "hypothesis_id": h.id, "strategy": "gap-filling", "title": "Hypothesis",
-                "statement": {"if_then_because": h.statement, "H0": "Null", "H1": "Alt"},
-                "variables": {"independent": "X", "dependent": "Y", "controls": []},
-                "predicted_outcome": h.rationale, "falsification_criterion": "...",
-                "novelty_score": 8, "testability_score": 9,
-                "evidence_map": {"supporting_papers": h.supporting_papers}
-            })
-    else:
-        # Fallback if the agent fails or returns dict instead of Pydantic model
-        if isinstance(hypothesis_list_obj, dict) and "hypotheses" in hypothesis_list_obj:
-            hypotheses_raw = hypothesis_list_obj["hypotheses"]
-        elif isinstance(hypothesis_list_obj, list):
-            hypotheses_raw = hypothesis_list_obj
+    hypotheses_raw = run_hypothesis_agent(literature_state, parsed_query)
 
     # 4. Experiment Agent
     experiments = run_experiment_agent(hypotheses_raw, parsed_query)
@@ -92,7 +50,7 @@ def run_research_pipeline(req: ResearchRequest):
     critique = run_critique_agent(hypotheses_raw, experiments)
     
     # 6. Synthesizer
-    proposal = run_synthesizer(req.question, parsed_query, lit_synthesis, hypotheses_raw, experiments, critique)
+    proposal = run_synthesizer(req.question, parsed_query, literature_state.get("synthesis", ""), hypotheses_raw, experiments, critique)
     
     # Assemble GlobalState exactly as frontend expects
     global_state = {

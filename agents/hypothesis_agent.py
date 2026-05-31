@@ -1,85 +1,80 @@
 import os
 import sys
 import json
-from groq import Groq
+import google.generativeai as genai
 
-# Adjust path so we can import tools and schema
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agents.literature_agent import run_literature_agent, get_paper_context_string
-from tools.hypothesisbank_loader import load_few_shot_examples
-from schema import HypothesisList
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY", "dummy"))
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY_1", "dummy"))
+model = genai.GenerativeModel("gemini-2.5-flash")
 
-def run_hypothesis_agent(enriched_papers: list[dict]) -> HypothesisList:
-    """Takes enriched papers and asks Groq to generate 3 novel hypotheses in JSON."""
-    if not enriched_papers:
-        print("No papers provided to hypothesis agent.")
-        return HypothesisList(hypotheses=[])
-
-    if os.environ.get("GROQ_API_KEY") is None or os.environ.get("GROQ_API_KEY") == "dummy":
-        print("Valid GROQ_API_KEY required. Returning empty hypotheses.")
-        return HypothesisList(hypotheses=[])
-
-    context_str = get_paper_context_string(enriched_papers)
-    few_shot_examples = load_few_shot_examples() # currently returns empty list, but wired up
+def run_hypothesis_agent(literature_results: dict, parsed_query: dict) -> list:
+    """Takes literature synthesis and parsed query to generate hypotheses via Gemini."""
     
+    if not literature_results or not literature_results.get("papers"):
+        return []
+
     system_prompt = (
-        "You are an expert scientific researcher. Given the following literature context, "
-        "identify 3 distinct research gaps and propose 3 novel, testable scientific hypotheses.\n"
-        "You MUST output ONLY a valid JSON object adhering to this exact schema:\n"
+        "You are the Hypothesis Agent. Generate exactly 3 distinct hypotheses based on the literature synthesis and gaps.\n"
+        "Strategy:\n"
+        "- H1 (Gap-filling): Directly addresses a gap.\n"
+        "- H2 (Mechanistic): Proposes a causal mechanism.\n"
+        "- H3 (Contrarian/Novel): Challenges a consensus or proposes a new angle.\n\n"
+        "Return a JSON object conforming exactly to this structure:\n"
         "{\n"
         '  "hypotheses": [\n'
         '    {\n'
-        '      "id": "H1",\n'
-        '      "statement": "...",\n'
-        '      "rationale": "...",\n'
-        '      "supporting_papers": ["Title 1", "Title 2"]\n'
+        '      "hypothesis_id": "H1 | H2 | H3",\n'
+        '      "strategy": "gap-filling | mechanistic | contrarian",\n'
+        '      "title": "string",\n'
+        '      "statement": {\n'
+        '        "if_then_because": "If [manipulation], then [expected outcome], because [mechanistic rationale]",\n'
+        '        "H0": "string",\n'
+        '        "H1": "string"\n'
+        '      },\n'
+        '      "variables": {\n'
+        '        "independent": "string",\n'
+        '        "dependent": "string",\n'
+        '        "controls": ["string"]\n'
+        '      },\n'
+        '      "predicted_outcome": "string",\n'
+        '      "falsification_criterion": "string",\n'
+        '      "novelty_score": 9,\n'
+        '      "novelty_justification": "string",\n'
+        '      "testability_score": 8,\n'
+        '      "testability_justification": "string",\n'
+        '      "evidence_map": {\n'
+        '        "supporting_papers": ["paper_id"],\n'
+        '        "supporting_reasoning": "string",\n'
+        '        "contradicting_papers": ["paper_id"],\n'
+        '        "contradicting_reasoning": "string",\n'
+        '        "gap_being_addressed": "string"\n'
+        '      },\n'
+        '      "theoretical_framework": "string"\n'
         '    }\n'
-        "  ]\n"
+        '  ]\n'
         "}\n"
     )
 
     try:
-        print("Calling Groq to generate 3 hypotheses...")
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant", # or llama-3.3-70b-versatile
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Literature Context:\n{context_str}"}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-            max_tokens=1000
+        print("Calling Gemini to generate 3 hypotheses...")
+        response = model.generate_content(
+            f"{system_prompt}\n\nParsed Query Variables: {json.dumps(parsed_query.get('variables', {}))}\n\nLiterature Synthesis: {literature_results.get('synthesis')}\n\nGaps: {json.dumps(literature_results.get('knowledge_gaps'))}",
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.7,
+            )
         )
         
-        json_response = response.choices[0].message.content.strip()
+        json_response = response.text.strip()
         parsed_data = json.loads(json_response)
         
-        # Validate against our Pydantic schema
-        hypothesis_list = HypothesisList(**parsed_data)
-        
-        # Simple retry mechanism if not exactly 3
-        if len(hypothesis_list.hypotheses) < 3:
-            print(f"Warning: Only generated {len(hypothesis_list.hypotheses)} hypotheses. A real implementation would retry here.")
-            
-        return hypothesis_list
+        if "hypotheses" in parsed_data:
+            return parsed_data["hypotheses"]
+        elif isinstance(parsed_data, list):
+            return parsed_data
+        return list(parsed_data.values())[0]
 
     except Exception as e:
-        print(f"Error calling Groq for hypotheses: {e}")
-        return HypothesisList(hypotheses=[])
-
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    print("--- Running Member A Integration Test ---")
-    
-    # 1. Run literature agent (which calls semantic scholar)
-    papers_with_insights = run_literature_agent("sleep and alzheimer's disease")
-    
-    # 2. Run hypothesis agent
-    final_hypotheses = run_hypothesis_agent(papers_with_insights)
-    
-    print("\n--- Final Generated Hypotheses ---")
-    print(final_hypotheses.model_dump_json(indent=2))
+        print(f"Error calling Gemini for hypotheses: {e}")
+        return []

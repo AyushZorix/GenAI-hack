@@ -1,11 +1,12 @@
 import os
 import json
-from groq import Groq
+import google.generativeai as genai
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY_2", "dummy"))
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 def run_synthesizer(question: str, parsed_query: dict, lit_synthesis: str, hypotheses: list, experiments: list, critique: dict) -> dict:
-    """Synthesizes the final research proposal."""
+    """Synthesizes the final research proposal using Gemini."""
     system_prompt = (
         "You are the Research Proposal Synthesizer.\n"
         "Assemble the proposal into 10 structured sections. Write rich, academic-style content.\n"
@@ -33,18 +34,15 @@ def run_synthesizer(question: str, parsed_query: dict, lit_synthesis: str, hypot
     )
 
     try:
-        print("Calling Groq to synthesize the final proposal...")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Question: {question}\nLiterature: {lit_synthesis}\nHypotheses: {json.dumps(hypotheses)}\nExperiments: {json.dumps(experiments)}\nCritique: {json.dumps(critique)}"}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=3000
+        print("Calling Gemini to synthesize the final proposal...")
+        response = model.generate_content(
+            f"{system_prompt}\n\nQuestion: {question}\nLiterature: {lit_synthesis}\nHypotheses: {json.dumps(hypotheses)}\nExperiments: {json.dumps(experiments)}\nCritique: {json.dumps(critique)}",
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.5,
+            )
         )
-        return json.loads(response.choices[0].message.content.strip())
+        return json.loads(response.text.strip())
     except Exception as e:
-        print(f"Error calling Groq for synthesizer: {e}")
+        print(f"Error calling Gemini for synthesizer: {e}")
         return {}

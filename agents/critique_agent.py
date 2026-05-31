@@ -1,12 +1,13 @@
 import os
 import sys
 import json
-from groq import Groq
+import google.generativeai as genai
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY_2", "dummy"))
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 def run_critique_agent(hypotheses: list, experiments: list) -> dict:
-    """Evaluates the hypotheses and experiments using Groq."""
+    """Evaluates the hypotheses and experiments using Gemini."""
     if not hypotheses or not experiments:
         return {}
 
@@ -39,19 +40,16 @@ def run_critique_agent(hypotheses: list, experiments: list) -> dict:
     )
 
     try:
-        print("Calling Groq to critique the research...")
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Hypotheses: {json.dumps(hypotheses)}\nExperiments: {json.dumps(experiments)}"}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.4,
-            max_tokens=2500
+        print("Calling Gemini to critique the research...")
+        response = model.generate_content(
+            f"{system_prompt}\n\nHypotheses: {json.dumps(hypotheses)}\nExperiments: {json.dumps(experiments)}",
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.4,
+            )
         )
         
-        return json.loads(response.choices[0].message.content.strip())
+        return json.loads(response.text.strip())
     except Exception as e:
-        print(f"Error calling Groq for critique: {e}")
+        print(f"Error calling Gemini for critique: {e}")
         return {}

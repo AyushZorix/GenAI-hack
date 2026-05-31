@@ -2,7 +2,7 @@ import os
 import json
 from groq import Groq
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+client = Groq(api_key=os.environ.get("GROQ_API_KEY_1", "dummy"))
 
 def run_orchestrator(question: str) -> dict:
     """Parses the user's research question into structured variables."""

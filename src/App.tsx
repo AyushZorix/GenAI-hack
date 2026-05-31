@@ -47,7 +47,15 @@ export default function App() {
   const [selectedHypIndex, setSelectedHypIndex] = useState(0);
   const [selectedExpIndex, setSelectedExpIndex] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
+  
+  // Search History State
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('searchHistory') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const manuscriptRef = useRef<HTMLDivElement>(null);
@@ -115,6 +123,12 @@ export default function App() {
     setLogs([]);
     setGlobalState(null);
     setProgressPercent(15);
+    
+    setSearchHistory(prev => {
+      const newHistory = [question, ...prev.filter(q => q !== question)].slice(0, 5);
+      localStorage.setItem('searchHistory', JSON.stringify(newHistory));
+      return newHistory;
+    });
 
     addLog("Orchestrator", `Initializing sequential research pipeline.`, "info");
     addLog("Orchestrator", `Target Inquiry: "${question}"`, "success");
@@ -413,11 +427,7 @@ export default function App() {
       onClick: triggerPipeline,
       className: step !== "idle" && step !== "completed" && step !== "error" ? "opacity-50 cursor-not-allowed" : ""
     },
-    {
-      icon: <Settings className={`w-4 h-4 transition-transform duration-500 ${showConfig ? "rotate-90 text-purple-400" : "text-white"}`} />,
-      label: "Toggle Config",
-      onClick: () => setShowConfig(!showConfig)
-    },
+
     {
       icon: <Database className={`w-4 h-4 ${activeInspectorTab === "papers" ? "text-purple-400" : "text-white"}`} />,
       label: "Papers Info",
@@ -523,103 +533,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Config Drawer */}
-          {showConfig && (
-            <div className="w-full border-b border-zinc-900 bg-zinc-950 px-8 py-5 transition-all duration-300 animate-in slide-in-from-top">
-              <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
-                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
-                    <Cpu className="w-3.5 h-3.5 text-purple-400" />
-                    Execution Mode
-                  </label>
-                  <div className="flex gap-1.5 mt-1">
-                    <button
-                      onClick={() => setUseRealApi(false)}
-                      className={`flex-1 py-1 px-2 rounded text-[9px] uppercase font-mono font-bold border transition-all ${
-                        !useRealApi
-                          ? "bg-purple-500/10 border-purple-500 text-purple-300"
-                          : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700"
-                      }`}
-                    >
-                      Offline Sim
-                    </button>
-                    <button
-                      onClick={() => {
-                        setUseRealApi(true);
-                        setApiProvider("gemini");
-                      }}
-                      className={`flex-1 py-1 px-2 rounded text-[9px] uppercase font-mono font-bold border transition-all ${
-                        useRealApi && apiProvider === "gemini"
-                          ? "bg-purple-500/10 border-purple-500 text-purple-300"
-                          : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700"
-                      }`}
-                    >
-                      Live Gemini
-                    </button>
-                    <button
-                      onClick={() => {
-                        setUseRealApi(true);
-                        setApiProvider("groq");
-                      }}
-                      className={`flex-1 py-1 px-2 rounded text-[9px] uppercase font-mono font-bold border transition-all ${
-                        useRealApi && apiProvider === "groq"
-                          ? "bg-purple-500/10 border-purple-500 text-purple-300"
-                          : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700"
-                      }`}
-                    >
-                      Live Groq
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
-                    <Key className="w-3.5 h-3.5 text-purple-400" />
-                    {apiProvider === "groq" ? "Groq API Key" : "Google Gemini API Key"}
-                  </label>
-                  <input
-                    type="password"
-                    disabled={!useRealApi}
-                    value={apiProvider === "groq" ? groqApiKey : geminiApiKey}
-                    onChange={(e) => {
-                      if (apiProvider === "groq") {
-                        setGroqApiKey(e.target.value);
-                      } else {
-                        setGeminiApiKey(e.target.value);
-                      }
-                    }}
-                    placeholder={useRealApi ? (apiProvider === "groq" ? "gsk_..." : "AIzaSy...") : "Disabled (Simulation Mode active)"}
-                    className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded text-xs focus:outline-none focus:border-purple-500 disabled:opacity-50 text-white font-mono"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
-                    <Settings className="w-3.5 h-3.5 text-purple-400" />
-                    Model Target
-                  </label>
-                  <select
-                    disabled={!useRealApi}
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded text-xs focus:outline-none focus:border-purple-500 text-white disabled:opacity-50 font-mono"
-                  >
-                    {apiProvider === "groq" ? (
-                      <>
-                        <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (recommended)</option>
-                        <option value="deepseek-r1-distill-llama-70b">deepseek-r1-distill-llama-70b</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="gemini-2.5-flash">gemini-2.5-flash (recommended)</option>
-                        <option value="gemini-2.5-pro">gemini-2.5-pro (deep research)</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Three-Column Workspace */}
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 items-stretch max-w-8xl w-full mx-auto pb-28">
@@ -645,13 +558,18 @@ export default function App() {
                 {/* Sourcing templates */}
                 {step === "idle" && (
                   <div className="flex flex-col gap-1.5">
-                    <span className="text-[9px] text-zinc-500 font-mono uppercase">Quick-load templates:</span>
+                    <span className="text-[9px] text-zinc-500 font-mono uppercase">
+                      {searchHistory.length > 0 ? "Recent Searches:" : "Quick-load templates:"}
+                    </span>
                     <div className="flex flex-col gap-1">
-                      {[
-                        { label: "LLM Hallucinations", query: "What decoding parameters mitigate factual hallucinations in retrieval augmented generation?" },
-                        { label: "Soil Microplastics", query: "What is the impact of microplastics on soil microbiome diversity?" },
-                        { label: "VR Cognitive Load", query: "Does cognitive load increase in immersive virtual reality learning environments?" }
-                      ].map((t, idx) => (
+                      {(searchHistory.length > 0 
+                        ? searchHistory.map((q) => ({ label: q, query: q })) 
+                        : [
+                            { label: "LLM Hallucinations", query: "What decoding parameters mitigate factual hallucinations in retrieval augmented generation?" },
+                            { label: "Soil Microplastics", query: "What is the impact of microplastics on soil microbiome diversity?" },
+                            { label: "VR Cognitive Load", query: "Does cognitive load increase in immersive virtual reality learning environments?" }
+                          ]
+                      ).map((t, idx) => (
                         <button
                           key={idx}
                           onClick={() => fillTemplate(t.query)}

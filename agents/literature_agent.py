@@ -1,68 +1,96 @@
 import os
 import sys
+import json
 from groq import Groq
 
-# Adjust path so we can import tools and schema
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.semantic_scholar import search_papers
-from schema import Paper
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY", "dummy"))
+client = Groq(api_key=os.environ.get("GROQ_API_KEY_2", "dummy"))
 
-def get_key_insight(abstract: str) -> str:
-    """Uses Groq to extract a one-sentence key insight from the abstract."""
-    if os.environ.get("GROQ_API_KEY") is None or os.environ.get("GROQ_API_KEY") == "dummy":
-        return "Insight generation requires a valid GROQ_API_KEY."
+def run_literature_agent(query: str, parsed_query: dict = None) -> dict:
+    """Finds papers and uses Groq to extract the full literature synthesis schema."""
+    if not parsed_query:
+        parsed_query = {}
         
-    try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": "You are a scientific assistant. Extract the single most important key insight from this abstract in one concise sentence."},
-                {"role": "user", "content": f"Abstract: {abstract}"}
-            ],
-            temperature=0.3,
-            max_tokens=100
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Error calling Groq: {e}")
-        return "Failed to extract insight."
-
-def run_literature_agent(query: str) -> list[dict]:
-    """Finds papers and extracts insights."""
-    papers = search_papers(query, limit=5)
-    enriched_papers = []
+    papers = search_papers(query, limit=8)
+    if not papers:
+        return {"papers": [], "synthesis": "No papers found.", "knowledge_gaps": [], "consensus_findings": [], "contradictions": []}
     
-    print("Extracting key insights for each paper using Groq...")
-    for paper in papers:
-        insight = get_key_insight(paper.abstract)
-        enriched_papers.append({
-            "paper": paper,
-            "insight": insight
+    print(f"\n📚 Successfully retrieved {len(papers)} papers:")
+    
+    # Prepare paper data for LLM processing
+    papers_for_llm = []
+    for idx, p in enumerate(papers):
+        print(f"  ✅ {p.title[:80]}..." if len(p.title) > 80 else f"  ✅ {p.title}")
+        papers_for_llm.append({
+            "paper_id": p.url or f"paper_{idx}",
+            "title": p.title or "Untitled Paper",
+            "abstract": p.abstract or "No abstract available",
+            "authors": getattr(p, "authors", ["Unknown"]),
+            "year": p.year or 2024,
+            "venue": getattr(p, "venue", "Academic Journal"),
+            "citationCount": getattr(p, "citationCount", 0),
+            "doi_or_url": p.url or ""
         })
-        print(f"✅ Processed: {paper.title[:50]}...")
+
+    system_prompt = (
+        "You are the Literature Agent, an expert in academic research synthesis.\n"
+        "Analyze the retrieved papers and generate a comprehensive synthesis.\n"
+        "Return a JSON object conforming exactly to this structure:\n"
+        "{\n"
+        '  "papers": [\n'
+        '    {\n'
+        '      "paper_id": "string",\n'
+        '      "title": "string",\n'
+        '      "authors": ["LastName, FirstInitial"],\n'
+        '      "year": 2024,\n'
+        '      "venue": "string",\n'
+        '      "citation_count": 0,\n'
+        '      "relevance_score": 9,\n'
+        '      "abstract_summary": "2-3 sentence summary",\n'
+        '      "key_findings": ["string"],\n'
+        '      "methodology_used": "string",\n'
+        '      "variables_studied": { "independent": ["string"], "dependent": ["string"] },\n'
+        '      "limitations_stated": ["string"],\n'
+        '      "supports_direction": "supports | contradicts | neutral | mixed",\n'
+        '      "doi_or_url": "string"\n'
+        '    }\n'
+        '  ],\n'
+        '  "synthesis": "string (narrative synthesis)",\n'
+        '  "knowledge_gaps": ["string"],\n'
+        '  "consensus_findings": ["string"],\n'
+        '  "contradictions": [\n'
+        '    {\n'
+        '      "topic": "string",\n'
+        '      "contradiction_description": "string",\n'
+        '      "paper_ids_side_a": ["string"],\n'
+        '      "paper_ids_side_b": ["string"]\n'
+        '    }\n'
+        '  ]\n'
+        "}\n"
+    )
+
+    try:
+        print("Calling Groq to generate full literature synthesis...")
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Parsed query context: {json.dumps(parsed_query)}\n\nRetrieved papers:\n{json.dumps(papers_for_llm, indent=2)}"}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.4,
+            max_tokens=3000
+        )
         
-    return enriched_papers
-
-def get_paper_context_string(enriched_papers: list[dict]) -> str:
-    """Helper function used by Member A's hypothesis agent. Do not modify."""
-    context = ""
-    for idx, item in enumerate(enriched_papers):
-        p = item["paper"]
-        context += f"[{idx+1}] Title: {p.title}\n"
-        context += f"Year: {p.year}\n"
-        context += f"Abstract: {p.abstract}\n"
-        context += f"Key Insight: {item['insight']}\n\n"
-    return context
-
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv() # Load the .env file locally for testing
-    
-    test_query = "gut microbiome and depression"
-    print(f"Running Literature Agent for query: {test_query}\n")
-    results = run_literature_agent(test_query)
-    
-    print("\n--- Final Output Context String ---\n")
-    print(get_paper_context_string(results))
+        json_resp = response.choices[0].message.content.strip()
+        parsed = json.loads(json_resp)
+        return parsed
+    except Exception as e:
+        print(f"Error calling Groq for literature synthesis: {e}")
+        # Return fallback mock schema if Groq fails
+        return {
+            "papers": [], "synthesis": f"Failed to synthesize: {str(e)}",
+            "knowledge_gaps": [], "consensus_findings": [], "contradictions": []
+        }
